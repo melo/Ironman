@@ -1,0 +1,68 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use EV;
+use AnyEvent;
+use AnyEvent::DNS;
+
+my $pending_requests = 0;
+
+if (!@ARGV) {
+  print STDERR <<"  EOU";
+  Usage: $0 domain [domain]*
+
+    Checks DNS for XMPP SRV records for each of the domains listed.
+    
+  EOU
+
+  exit(2);
+}
+
+for my $domain (@ARGV) {
+  check_domain($domain);
+}
+
+my $cv = AnyEvent->condvar;
+$cv->wait;
+exit(0);
+
+
+sub check_domain {
+  my ($domain) = @_;
+  
+  AnyEvent::DNS::srv(
+    'xmpp-server', 'tcp', $domain,
+    _print_srv_rrs('Server-to-server', $domain),
+  );
+  
+  AnyEvent::DNS::srv(
+    'xmpp-client', 'tcp', $domain,
+    _print_srv_rrs('Client-to-server', $domain),
+  );
+}
+
+sub _print_srv_rrs {
+  my ($name, $domain) = @_;
+  
+  $pending_requests++;
+  
+  return sub {
+    my @rrs = @_;
+    
+    print "$name records for '$domain':";
+    if (@rrs) {
+      print "\n";
+      foreach my $rr (@_) {
+        print "  $rr->[3] port $rr->[2] (prio=$rr->[0], weight=$rr->[1])\n";
+      }
+      print "\n";
+    }
+    else {
+      print " NOT FOUND\n";
+    }
+    
+    $pending_requests--;
+    $cv->send unless $pending_requests;
+  };
+}
